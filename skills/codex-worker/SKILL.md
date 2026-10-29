@@ -47,12 +47,22 @@ Specify *what* and the key design constraints, not every line. Let Codex choose 
 ## 3. Run Codex
 
 ```bash
-~/.claude/skills/codex-worker/scripts/codex-run.sh start "<repo_dir>" "<task_file>"
+~/.claude/skills/codex-worker/scripts/codex-run.sh [-m <model>] [-e <effort>] start "<repo_dir>" "<task_file>"
 ```
 
 - Runs can take many minutes: launch it with Bash `run_in_background: true` and wait for the completion notification. Do not poll, and do not edit the repo while it runs.
-- Optional env: `CODEX_WORKER_MODEL=<model>`; `CODEX_WORKER_NETWORK=1` (only with user approval).
-- The script prints a summary (also saved as `summary.txt` in the run dir): `session_id`, exit code, files changed during the run, warnings (HEAD moved, touched pre-existing user changes), commands Codex ran, and the path of Codex's final report. Keep the `session_id` for repairs.
+- Optional env: `CODEX_WORKER_NETWORK=1` (only with user approval).
+- The script prints a summary (also saved as `summary.txt` in the run dir): model and effort used, `session_id`, exit code, files changed during the run, warnings (HEAD moved, touched pre-existing user changes), commands Codex ran, and the path of Codex's final report. Keep the `session_id` for repairs.
+
+### Model and reasoning effort
+
+The user picks; Claude never chooses a model or effort on its own.
+- If the request names a model and/or effort (e.g. `/codex-worker model=gpt-6-sol effort=high ...`, "让 codex 用 6.1 sol、xhigh 做", "use codex with gpt-6-luna"), pass them with `-m` / `-e`.
+- Resolve loose names ("sol", "6.1 terra", "luna 高推理") against `codex-run.sh models`, which lists the models this Codex account has, their supported efforts, and the config default. If the name matches several models or none, show the list and ask; do not guess.
+- If the user asks which models are available, run `codex-run.sh models` and show the result.
+- If nothing is named, pass no flags: Codex uses the user's `~/.codex/config.toml` default (or `CODEX_WORKER_MODEL` / `CODEX_WORKER_EFFORT` if set).
+- Repair rounds reuse the first run's model and effort automatically. Pass `-m`/`-e` on `resume` only when the user asks to switch.
+- Mention the model and effort used in the progress note and in the final report.
 - Tell the user briefly that Codex is working and on what.
 
 ## 4. Verify independently (Claude)
@@ -71,7 +81,7 @@ Verdict: **PASS** only if every acceptance criterion is verified by your own evi
 On FAIL, write a feedback file with: the numbered findings (file:line, what is wrong, evidence such as failing output), what must not change, and the same report format. Then resume the same Codex session so it keeps its context:
 
 ```bash
-~/.claude/skills/codex-worker/scripts/codex-run.sh resume "<repo_dir>" "<session_id>" "<feedback_file>"
+~/.claude/skills/codex-worker/scripts/codex-run.sh [-m <model>] [-e <effort>] resume "<repo_dir>" "<session_id>" "<feedback_file>"
 ```
 
 Re-run step 4 in full after each round. After 2 failed repair rounds, stop delegating: either fix the small remainder yourself (if it is small and clear) or report to the user with the current state and options. If Codex reports it is blocked (needs network, credentials, a design decision), resolve it with the user rather than retrying blindly.
@@ -82,7 +92,7 @@ Re-run step 4 in full after each round. After 2 failed repair rounds, stop deleg
 - Evidence: commands *you* ran and their results (pass/fail counts), not Codex's claims.
 - Files changed (from the diff).
 - Remaining risks, unverified parts, and any deviations from the plan.
-- Number of Codex runs/repair rounds.
+- Number of Codex runs/repair rounds, and the model/effort used.
 - Changes are left uncommitted in the working tree; offer to commit only if the user wants.
 
 ## Hard rules

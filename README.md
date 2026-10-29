@@ -49,11 +49,32 @@ cd codex-worker
 
 如果想彻底禁止 Claude 自行调用，只允许 `/codex-worker` 触发，可以在 `SKILL.md` 的 frontmatter 里加一行 `disable-model-invocation: true`。
 
+### 选择模型和推理强度
+
+在请求里直接写就行，不写则使用 `~/.codex/config.toml` 里的默认设置：
+
+```
+/codex-worker model=gpt-6-sol effort=high 给用户列表加分页
+让 codex 用 6.1 sol、xhigh 实现 X
+codex 现在有哪些模型？
+```
+
+- Claude 会把模糊的名字（比如「sol」「6.1 terra」）对照你账号可用的模型列表解析；对不上或者有歧义时会先问你。
+- 修复轮自动沿用第一次运行的模型和推理强度，除非你要求切换。
+- Claude 不会自己挑模型。
+
+查看可用模型（读取 Codex 本地的模型缓存）：
+
+```bash
+~/.claude/skills/codex-worker/scripts/codex-run.sh models
+```
+
 ### 可选环境变量
 
 | 变量 | 作用 |
 |---|---|
-| `CODEX_WORKER_MODEL=<model>` | 指定 Codex 使用的模型（默认读取 `~/.codex/config.toml`） |
+| `CODEX_WORKER_MODEL=<model>` | 默认模型（优先级高于 `config.toml`，低于请求里指定的模型） |
+| `CODEX_WORKER_EFFORT=<level>` | 默认推理强度，如 `low` / `medium` / `high` / `xhigh` / `max` |
 | `CODEX_WORKER_NETWORK=1` | 允许沙箱联网（Skill 规定开启前要先征得你同意） |
 
 ## 文件结构
@@ -70,8 +91,9 @@ install.sh
 也可以单独使用辅助脚本：
 
 ```bash
-skills/codex-worker/scripts/codex-run.sh start  <repo_dir> <task_file>
-skills/codex-worker/scripts/codex-run.sh resume <repo_dir> <session_id> <feedback_file>
+skills/codex-worker/scripts/codex-run.sh [-m model] [-e effort] start  <repo_dir> <task_file>
+skills/codex-worker/scripts/codex-run.sh [-m model] [-e effort] resume <repo_dir> <session_id> <feedback_file>
+skills/codex-worker/scripts/codex-run.sh models
 ```
 
 已在 Codex CLI 0.165 上测试。
