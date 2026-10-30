@@ -188,10 +188,41 @@ bash tests/smoke.sh
 
 ## 测试状态
 
-- **codex**：在 Codex CLI 0.153 上端到端测试通过（`-m gpt-5.6-sol -e low`）。注意：`~/.codex/config.toml` 里的默认模型在 ChatGPT 账号下可能不可用，报 `model_not_found`，这时需要用 `-m` 指定一个账号可用的模型。
+- **codex**：在 Codex CLI 0.153 上端到端测试通过（`-m gpt-5.6-sol -e low`）。报 `model_not_found` 时多半是 CLI 版本太旧，见下面的「常见问题」。
 - **claude**：在 Claude Code CLI 2.1.296 上端到端测试通过（`start` 与 `resume` 修复轮）。
 - **cursor**：在 Cursor agent CLI 2026.10.22 上端到端测试通过（`start` 与 `resume`，`-m gpt-5.4-mini -e low`）。在 Windows 上 Cursor 不支持沙箱（`--sandbox enabled` 仅 macOS/Linux），所以默认**不加 `--force`**：改文件可以，但 shell 命令会被拒绝。需要让 Cursor 跑测试/构建时，设 `CURSOR_WORKER_FORCE=1`（等于不受限地执行命令，Skill 规定要先征得你同意）。
 - **Master**：Claude Code 作为 Master 已使用。Codex 和 Cursor 作为 Master（从 `~/.agents/skills` 发现并执行 Skill）尚未实测。
+
+## 常见问题
+
+### Codex 报 `model_not_found`：「The '<model>' model is not supported when using Codex with a ChatGPT account」
+
+最常见的原因是**本机 Codex CLI 版本太旧**，不是账号没有这个模型，也和 Master 会话本身用的是什么模型无关（Worker 是独立启动的 Codex 进程，`-m` 指定的就是 Worker 的模型）。
+
+ChatGPT 账号下，Codex 服务端会按客户端版本下发可用模型。新模型只对较新的 CLI 开放，旧 CLI 请求这些模型时，服务端直接返回 400 `model_not_found`。
+
+实测（2026-10-30，同一个 ChatGPT 账号）：
+
+| 模型 | Codex CLI 0.153.0 | Codex CLI 0.166.0 |
+|---|---|---|
+| `gpt-6-astra` | ✅ | — |
+| `gpt-6-luna` | ❌ `model_not_found` | ✅ |
+| `gpt-6.1-terra` | ❌ `model_not_found` | ✅ |
+
+排查步骤：
+
+1. 看本机版本和服务端给这个版本下发的模型：
+   ```bash
+   codex --version
+   bash <skill_dir>/scripts/worker-run.sh -w codex models   # 读取 ~/.codex/models_cache.json
+   ```
+   `models_cache.json` 里的 `client_version` 就是拉取列表时的 CLI 版本。想用的模型不在列表里，基本就是版本问题。
+2. 看最新版本：`npm view @openai/codex version`。
+3. 不升级也可以先验证：`npx -y @openai/codex@<最新版本> exec --skip-git-repo-check -s read-only -m <model> -` 能跑通，就说明升级 CLI 能解决。
+4. 升级 Codex CLI（用你当初的安装方式，例如 `npm i -g @openai/codex@latest`，或重新运行官方安装包）。
+5. 如果 `~/.codex/config.toml` 里的默认 `model` 是新版才支持的模型，旧 CLI 不带 `-m` 时也会报这个错。这时可以升级，或者用 `-m` 换一个列表里有的模型。
+
+如果升级到最新版、模型仍然不在列表里，才是账号或套餐没有开放这个模型。
 
 ## License
 
