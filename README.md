@@ -4,10 +4,40 @@ An agent skill where **the agent session you are working in (Claude Code, Codex 
 
 当前 IDE 里的 Agent 会话（Claude Code / Codex / Cursor）是 **Master**：负责理解需求、规划、定义验收标准和最终验收。用 `-w` 选的 CLI 是 **Worker**（Codex / Claude CLI / Cursor）：负责写代码、写测试和调试。Worker 的自我报告不算证据，Master 会自己检查真实的 `git diff` 并亲自跑验证。
 
+## 为什么需要它（Problem Statement）
+
+很多人同时在用好几个 Coding Agent：Claude Code、Codex、Cursor。它们各有长处，但差别很大：
+
+- **能力和模型不同**：擅长的任务不一样，可选的模型和推理强度也不一样。
+- **额度分开计算**：一个工具的额度用完了，或者某个模型在当前账号或 CLI 版本下不可用，就想把活交给另一个。
+- **执行环境不同**：Codex 有 `workspace-write` 沙箱；Claude Code 靠权限模式和工具白名单；Cursor 在 Windows 上没有沙箱。
+- **接口各不相同**：启动方式、会话恢复、输出格式、退出码都不一样。
+
+问题在于，这些工具之间**没有统一的任务交付和验收机制**：
+
+- 换一个工具干活，就要重新写一遍任务说明，重新学一遍它的会话和输出格式。
+- Worker 说「测试都过了」，但这是它的自我报告，不是证据。
+- 让一个 Agent 去调另一个 Agent 时，没人保证它只改了该改的文件、没碰你没提交的改动、没自己 commit，也没人保证两个 Agent 不会同时写同一个工作区。
+
+agent-dispatch 把这些统一起来：不管谁当 Master、谁当 Worker，都用**同一套 Task Spec、同一种执行证据、同一个验收与修复流程**，最终验收权始终在 Master 手里。
+
+它**不做**的事：它不是独立的编排服务，没有 MCP Server、守护进程或数据库；不会自动选择 Worker，也不会并行跑多个 Worker。这些留到后续版本。
+
+## 架构（Architecture）
+
 ```
-需求 → Master：探索 / 规划 / 验收标准 → Worker：实现 / 测试
-     → Master：检查 diff + 独立验证 → PASS 交付 / FAIL 反馈给同一个 Worker 会话修复（默认最多 2 轮）
-PLAN → DISPATCH → VERIFY → ACCEPT | REPAIR | ESCALATE
+                         Master Agent
+                 Claude Code / Codex / Cursor
+            Planning · Task Specification · Review
+                              │
+                              ↓  Skill-driven delegation
+       ┌──────────────┬──────────────┬──────────────┐
+       │  Codex CLI   │ Claude Code  │ Cursor Agent │
+       └──────────────┴──────────────┴──────────────┘
+                              │
+                              ↓  Diff · Test Results · Execution Evidence
+                      Master Verification
+                   Accept / Repair / Escalate
 ```
 
 ## 特点
@@ -25,7 +55,7 @@ PLAN → DISPATCH → VERIFY → ACCEPT | REPAIR | ESCALATE
   - Claude 不使用 `bypassPermissions`，只允许工具白名单（默认 `Read Edit Write Glob Grep Bash`），并禁止 `git commit / push / merge / rebase / reset / checkout / stash / clean / restore`。注意：`Bash` 在白名单内，因此 Claude Worker 可以运行任意 shell 命令，只是不能用上面列出的 git 写操作。
   - 不自动 commit、push、merge 或部署；Master 只有在你明确授权后才 commit / push。
   - 任务文件和日志都不进你的仓库。
-  - 「Worker 不能 commit」是事后检测（HEAD drift 警告），不是权限隔离。真正的强制隔离需要受限环境和 git 凭证隔离，留到后续版本。
+  - 这些约束的边界见「证据与限制」。
 
 ## 安装
 
@@ -178,20 +208,86 @@ skills/agent-dispatch/scripts/worker-run.sh [-w ...] [-m model] [-e effort] resu
 skills/agent-dispatch/scripts/worker-run.sh [-w ...] models
 ```
 
-## 测试
+## 证据与限制（Evidence & Limitations）
+
+这一节只写真正跑过的东西，没跑过的明确标为未验证。
+
+### 自动化测试
 
 ```bash
 bash tests/smoke.sh
 ```
 
-用假的 `codex` / `claude` / `agent` 命令覆盖：三种 Worker 的 start / resume、会话 ID 解析、模型与强度解析、改动检测、触碰用户改动的警告、Worker 自行 commit（含新文件）、Worker 失败、工作区锁（占用中 / 死锁回收）、递归保护、参数错误和 `install.sh`。不调用真实模型。
+用假的 `codex` / `claude` / `agent` 命令跑，不需要账号，也不消耗额度。覆盖三种 Worker 的 start / resume、会话 ID 解析、模型与强度解析、改动检测、触碰用户改动的警告、Worker 自行 commit（含新文件）、Worker 失败、工作区锁（占用中 / 死锁回收）、递归保护、参数错误和 `install.sh`。
 
-## 测试状态
+当前结果：**48 / 48 通过**（Windows 11，Git Bash）。
 
-- **codex**：在 Codex CLI 0.153 上端到端测试通过（`-m gpt-5.6-sol -e low`）。报 `model_not_found` 时多半是 CLI 版本太旧，见下面的「常见问题」。
-- **claude**：在 Claude Code CLI 2.1.296 上端到端测试通过（`start` 与 `resume` 修复轮）。
-- **cursor**：在 Cursor agent CLI 2026.10.22 上端到端测试通过（`start` 与 `resume`，`-m gpt-5.4-mini -e low`）。在 Windows 上 Cursor 不支持沙箱（`--sandbox enabled` 仅 macOS/Linux），所以默认**不加 `--force`**：改文件可以，但 shell 命令会被拒绝。需要让 Cursor 跑测试/构建时，设 `CURSOR_WORKER_FORCE=1`（等于不受限地执行命令，Skill 规定要先征得你同意）。
-- **Master**：Claude Code 作为 Master 已使用。Codex 和 Cursor 作为 Master（从 `~/.agents/skills` 发现并执行 Skill）尚未实测。
+为了确认这些测试真的能抓到问题，做过三次「故意改坏」检查。每次只破坏一处逻辑，对应的测试都失败了：
+
+| 故意破坏的逻辑 | 失败的测试 |
+|---|---|
+| 不把 Worker 提交里的文件算进改动列表 | `committed new file still listed` |
+| 永远不回收死掉进程的锁 | `stale lock reclaimed, run succeeds` 等 4 项 |
+| 关掉递归保护 | `refuses inside a worker` |
+
+### 真实 CLI 端到端运行
+
+2026-10-30，Windows 11 + Git Bash，Claude Code 作为 Master。每个 Worker 在独立的临时仓库里做同一个小任务（给 `calc.py` 加 `add` 函数），然后跑一轮修复（要求补 docstring）。每轮结束后，Master 自己检查 `git diff`、运行 `git diff --check`，并实际执行代码验证。
+
+| Worker | 版本 | 模型 / 强度 | 首次执行 | 修复轮（resume） | Master 独立验证 |
+|---|---|---|---|---|---|
+| codex | Codex CLI 0.153.0 | `gpt-5.6-sol` / low | 73 秒，exit 0 | 71 秒，沿用同一会话 | 只改了 `calc.py`；`add(2,3)=5`；`mul` 没变；docstring 已加 |
+| claude | Claude Code 2.1.296 | `haiku` / low | 46 秒，exit 0 | 41 秒 | 同上 |
+| cursor | Cursor agent 2026.10.22 | `gpt-5.4-mini` / low | 67 秒，exit 0 | 51 秒 | 同上 |
+
+三个修复轮都自动沿用了首次运行的 Worker、模型和强度，也没有把 Worker 上一轮的改动误报为「用户改动」。
+
+一次真实运行的输出（codex 首次执行；路径已缩短）：
+
+```
+== worker-run ==
+mode:        start
+worker:      codex
+model:       gpt-5.6-sol
+effort:      low
+session_id:  01a18b0f-9433-7a61-ada4-91d6c68afb95
+exit_code:   0  (elapsed 73s)
+
+Files changed during this run (1):
+  calc.py
+
+Commands run: 3 (non-zero exits: 1) -> <run_dir>/commands.tsv
+```
+
+这里那条「非零退出」是 Worker 先试了 `python`，本机没有这个命令；它随后改用 `py` 成功了。`commands.tsv` 把这个过程原样记了下来，Master 验收时能看到。
+
+### 失败与恢复场景
+
+| 场景 | 行为 | 怎么验证的 |
+|---|---|---|
+| Worker 运行时，另一个 Master 对同一仓库派发 | 第二个立即退出，退出码 3，并打印锁的持有者（进程号、Worker、开始时间） | 真实 CLI：codex 运行中再启动 claude；以及冒烟测试 |
+| 上次运行被强杀，留下锁 | 持锁进程已不存在时自动回收，并提示 `reclaiming stale lock` | 冒烟测试 |
+| Worker 失败（如模型报错） | 透传 Worker 的退出码；`summary.json` 为 `status: failed` 并带错误信息；锁照常释放 | 冒烟测试 |
+| Worker 擅自 commit（包括新建文件后 commit） | 警告 HEAD 移动并列出提交；提交里的文件也算进改动列表 | 冒烟测试 |
+| Worker 改了你原本未提交的文件 | 警告并列出这些文件，`summary.json` 的 `user_files_touched` | 冒烟测试 |
+| 修复轮 | resume 同一会话；以首轮开始前的状态为基准，不会把 Worker 自己上一轮的改动当成用户改动 | 真实 CLI（三种 Worker）+ 冒烟测试 |
+| Worker 里再调用 agent-dispatch | 拒绝执行，退出码 2 | 冒烟测试 |
+| Codex 报 `model_not_found` | 不是脚本问题，多半是 CLI 版本太旧 | 真实 CLI 对比 0.153.0 与 0.166.0，见「常见问题」 |
+
+### 已知限制
+
+- **「Worker 不能 commit / push」不是强制安全隔离。** Codex 靠沙箱，Claude 靠工具白名单和 git 命令的拒绝规则，Cursor 不加 `--force` 时不能执行命令。但没有一种是凭证级隔离。HEAD drift 检测是**事后发现**，不是事前阻止，而且查不到 push。要真正隔离，需要独立 worktree / 容器和受限的 git 凭证，留到后续版本。
+- **Claude Worker 可以运行任意 shell 命令**：`Bash` 在默认白名单里，只是禁止了列出的那几种 git 写操作。
+- **Cursor 在 Windows 上没有沙箱**（`--sandbox enabled` 只在 macOS / Linux 生效），所以默认不加 `--force`。这时它能改文件，但不能跑测试。设 `CURSOR_WORKER_FORCE=1` 等于让它不受限地执行命令。Cursor 的 JSON 输出里也没有命令记录，所以 `commands.tsv` 一直是空的。
+- **改动检测按文件**：能发现 Worker 碰了你已改过的文件，但分不出同一个文件里哪些行是你改的、哪些是 Worker 改的。这需要 Master 看 diff 判断。
+- **锁只管 agent-dispatch 自己**：它挡得住第二个 Worker，挡不住你或 IDE 同时手动编辑。锁靠进程号判断死活；进程号被复用时会当成「仍在占用」（宁可误报占用，也不误删），需要手动删锁目录。
+- **验收质量取决于 Master**：最终判定是 Master（一个 LLM）跑验证后做出的，不是确定性的评测器。
+- **证据在临时目录**：每次运行的证据和评审记录放在 `$TMPDIR/agent-dispatch`，系统清理临时目录后会丢失。修复轮依赖的会话状态在 `~/.local/state`，不受影响。
+- **未验证**：
+  - Codex 和 Cursor 作为 Master：能否从 `~/.agents/skills` 发现 Skill，它们的沙箱是否允许运行执行器。
+  - macOS 自带的 bash 3.2：只做了代码层面的检查，没在真机上跑。
+  - Linux / macOS 上 Cursor 的 `--sandbox enabled` 路径。
+- **v0.2 不做**：自动选择 Worker、额度感知、并行 Worker、根据评审结果自动演进 Skill。
 
 ## 常见问题
 
