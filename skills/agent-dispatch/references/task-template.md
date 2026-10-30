@@ -1,4 +1,4 @@
-# Task spec template for Codex
+# Task spec template for the worker
 
 Copy this, fill every section, and save it outside the repo. Delete the hints in brackets.
 
@@ -12,10 +12,10 @@ Copy this, fill every section, and save it outside the repo. Delete the hints in
 - Repository: <what it is, stack, how it is structured — only what matters for this task>
 - Relevant files: <path — why it matters>
 - Patterns to follow: <existing module/function to mimic, naming, error handling style>
-- Decisions already made: <architecture choices Claude/the user settled; do not revisit>
+- Decisions already made: <architecture choices the Master/the user settled; do not revisit>
 
 ## Scope
-- In scope: <files/dirs Codex may change or create>
+- In scope: <files/dirs the worker may change or create>
 - Out of scope: <must not touch: public APIs, config, lockfiles, unrelated modules, ...>
 
 ## Acceptance criteria
