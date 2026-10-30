@@ -108,7 +108,7 @@ check "usage parsed" jqt '.usage.input_tokens == 10'
 check "head unchanged" jqt '.head_moved == false'
 check "worker ran with AGENT_DISPATCH_WORKER=1" grep -qx "worker_env=1" "$tmp/codex-env"
 check "workspace-write sandbox, no dangerous flags" bash -c 'grep -q -- "-s workspace-write" "$1" && ! grep -q danger "$1"' _ "$tmp/codex-args"
-check "session state saved in state dir" test -f "$tmp/state/session-codex-sid-1.env"
+check "session state saved in state dir" bash -c 'compgen -G "$1/sessions/*.json" >/dev/null && jq -e ".session_id == \"codex-sid-1\"" "$1"/sessions/*.json' _ "$tmp/state"
 check "lock released" test ! -e "$repo/.git/agent-dispatch.lock"
 
 echo "codex resume"
@@ -190,7 +190,7 @@ mkdir -p "$home"
 out=$(HOME="$home" CLAUDE_CONFIG_DIR= bash "$here/install.sh" --target all 2>&1); code=$?
 check "install --target all" test "$code" = 0
 for d in "$home/.claude/skills/agent-dispatch" "$home/.agents/skills/agent-dispatch"; do
-  check "installed $d" test -f "$d/SKILL.md" -a -x "$d/scripts/worker-run.sh" -a -f "$d/references/review.md"
+  check "installed $d" test -f "$d/SKILL.md" -a -x "$d/scripts/worker-run.sh" -a -x "$d/scripts/dispatchctl.sh" -a -f "$d/scripts/normalize-usage.jq" -a -f "$d/references/review.md"
 done
 out=$(HOME="$home" CLAUDE_CONFIG_DIR= bash "$here/install.sh" --target agents 2>&1); code=$?
 check "reinstall without --force refused" test "$code" = 1

@@ -1,0 +1,1 @@
+{"type":"result","subtype":"success","is_error":false,"duration_ms":26756,"duration_api_ms":26756,"result":"### Summary\nAdded `add(a, b)` to `calc.py`.","session_id":"ab84608b-d154-4abd-b200-01fffa24ed7c","request_id":"9fb72483-eff1-4bf9-9858-9a57729db88f","usage":{"inputTokens":15247,"outputTokens":482,"cacheReadTokens":43776,"cacheWriteTokens":0}}

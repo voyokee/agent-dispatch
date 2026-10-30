@@ -39,7 +39,7 @@ for dest in "${dests[@]}"; do
   mkdir -p "$(dirname "$dest")"
   rm -rf "$dest"
   cp -R "$src" "$dest"
-  chmod +x "$dest/scripts/worker-run.sh"
+  chmod +x "$dest/scripts/worker-run.sh" "$dest/scripts/dispatchctl.sh"
   echo "Installed agent-dispatch to $dest"
 done
 
